@@ -64,12 +64,6 @@
       }
     }
 
-    async function loadMe() {
-      const data = await api('/api/auth/me');
-      me = data.user;
-      document.getElementById('me').textContent = me ? `Logged in as ${me.username}` : '';
-    }
-    loadMe();
     window.acceptPayout = acceptPayout;
     load().catch(e => { document.getElementById('err').textContent = e.message; });
   </script>
