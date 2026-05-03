@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MyBetsIndia | Bet Status</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #ddd; }
+    .nav { display: flex; gap: 12px; }
+    main { padding: 16px; display: grid; gap: 10px; }
+    .card { border: 1px solid #ddd; padding: 10px; display: grid; gap: 8px; }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .error { color: #b00020; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>MyBetsIndia</strong>
+    <div class="nav">
+      <span id="me">Logged Out</span>
+      <a href="/bet-status.html">Bet Status</a>
+      <a href="/">Home</a>
+    </div>
+  </header>
+  <main>
+    <div id="list"></div>
+    <div id="err" class="error"></div>
+  </main>
+  <script>
+    const API = window.API_BASE || 'http://127.0.0.1:8787';
+    async function api(path, options = {}) {
+      const res = await fetch(API + path, { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...options });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Request failed');
+      return json;
+    }
+    function inr(n){ return `₹${Number(n || 0).toFixed(2)}`; }
+
+    async function load() {
+      const data = await api('/api/bet-status');
+      const html = (data.items || []).map(item => `
+        <div class="card">
+          <div><strong>${item.title}</strong></div>
+          <div>Your Bet: ${inr(item.user_amount)}</div>
+          <div>Won: ${item.won ? 'Yes' : 'No'}</div>
+          <div>Payout Due: ${inr(item.payout_due)}</div>
+          ${item.won ? `<div class="row"><button onclick="acceptPayout(${item.market_id})">Accept Payout</button>${item.link_url ? `<a href="${item.link_url}" target="_blank" rel="noopener">Open Existing Link</a>` : ''}</div>` : ''}
+          <div class="error" id="e-${item.market_id}"></div>
+        </div>
+      `).join('');
+      document.getElementById('list').innerHTML = html || '<div>No resolved bets yet.</div>';
+    }
+
+    async function acceptPayout(marketId) {
+      const errEl = document.getElementById(`e-${marketId}`);
+      if (errEl) errEl.textContent = '';
+      try {
+        const data = await api(`/api/bet-status/${marketId}/accept-payout`, { method: 'POST' });
+        if (data.link_url) window.open(data.link_url, '_blank', 'noopener');
+        await load();
+      } catch (e) {
+        if (errEl) errEl.textContent = e.message || 'Failed';
+      }
+    }
+
+    async function loadMe() {
+      const data = await api('/api/auth/me');
+      me = data.user;
+      document.getElementById('me').textContent = me ? `Logged in as ${me.username}` : '';
+    }
+    loadMe();
+    window.acceptPayout = acceptPayout;
+    load().catch(e => { document.getElementById('err').textContent = e.message; });
+  </script>
+</body>
+</html>

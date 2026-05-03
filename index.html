@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MyBetsIndia</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #ddd; }
+    .nav { display: flex; gap: 12px; align-items: center; }
+    main { padding: 16px; display: grid; gap: 14px; }
+    .market { border: 1px solid #ddd; padding: 12px; display: grid; gap: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .graph { height: 16px; display: flex; border: 1px solid #ccc; }
+    .seg { height: 100%; }
+    .hidden { display: none; }
+    .error { color: #b00020; font-size: 13px; min-height: 18px; }
+    textarea,input,select,button { padding: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>MyBetsIndia</strong>
+    <div class="nav">
+      <a href="/bet-status.html">Bet Status</a>
+      <span id="me">Logged Out</span>
+      <button id="signinBtn">Sign In</button>
+      <button id="logoutBtn" class="hidden">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="adminPanel" class="market hidden">
+      <div class="row"><strong>Create bet</strong></div>
+      <input id="mTitle" placeholder="Market title" />
+      <textarea id="mDesc" placeholder="Description"></textarea>
+      <select id="mType">
+        <option value="binary">Binary (2 options)</option>
+        <option value="multi">Multi-option</option>
+      </select>
+      <input id="mOptions" placeholder="Options comma separated, e.g. Yes,No" />
+      <button id="createBtn">Create Market</button>
+    </section>
+    <section id="markets"></section>
+  </main>
+
+  <script>
+    const API = window.API_BASE || 'http://127.0.0.1:8787';
+    let me = null;
+
+    async function api(path, options = {}) {
+      const res = await fetch(API + path, { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...options });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Request failed');
+      return json;
+    }
+
+    function inr(n) { return `₹${Number(n || 0).toFixed(2)}`; }
+
+    function graphHTML(market) {
+      const total = (market.pools || []).reduce((s, p) => s + Number(p.total), 0);
+      const optMap = new Map((market.options || []).map(o => [o.id, o.label]));
+      const colors = ['#cde','#dec','#ecd','#ced','#dce','#edc'];
+      const segments = (market.pools || []).map((p, i) => {
+        const pct = total ? (Number(p.total) / total) * 100 : 0;
+        return `<div class="seg" style="width:${pct}%;background:${colors[i % colors.length]}"></div>`;
+      }).join('');
+      const legend = (market.pools || []).map((p) => {
+        const pct = total ? ((Number(p.total) / total) * 100).toFixed(1) : '0.0';
+        return `<div>${optMap.get(p.option_id) || 'Option'}: ${pct}% (${inr(p.total)})</div>`;
+      }).join('');
+      return `<div class="graph">${segments}</div><div>${legend || 'No confirmed liquidity yet'}</div>`;
+    }
+
+    function marketCard(m) {
+      const options = (m.options || []).map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+      const resolveUi = me?.is_admin
+        ? `<div class="row"><select id="resolve-${m.id}">${options}</select><button onclick="resolveMarket(${m.id})">Resolve</button></div>`
+        : '';
+      return `
+        <article class="market">
+          <strong>${m.title}</strong>
+          <div>${m.description || ''}</div>
+          ${graphHTML(m)}
+          <div class="row"><select id="opt-${m.id}">${options}</select><input id="amt-${m.id}" type="number" min="1" step="0.01" placeholder="Amount INR" /><button onclick="bet(${m.id})">Bet</button></div>
+          <div class="error" id="err-${m.id}"></div>
+          ${resolveUi}
+        </article>
+      `;
+    }
+
+    async function loadMe() {
+      const data = await api('/api/auth/me');
+      me = data.user;
+      document.getElementById('me').textContent = me ? `Logged in as ${me.username}` : '';
+      document.getElementById('signinBtn').classList.toggle('hidden', !!me);
+      document.getElementById('logoutBtn').classList.toggle('hidden', !me);
+      document.getElementById('adminPanel').classList.toggle('hidden', !(me && me.is_admin));
+    }
+
+    async function loadMarkets() {
+      const data = await api('/api/markets');
+      document.getElementById('markets').innerHTML = (data.markets || []).map(marketCard).join('');
+    }
+
+    async function createMarket() {
+      const title = document.getElementById('mTitle').value.trim();
+      const description = document.getElementById('mDesc').value.trim();
+      const type = document.getElementById('mType').value;
+      const options = document.getElementById('mOptions').value.split(',').map(s => s.trim()).filter(Boolean);
+      await api('/api/admin/markets', { method: 'POST', body: JSON.stringify({ title, description, type, options }) });
+      await loadMarkets();
+    }
+
+    async function bet(marketId) {
+      const errEl = document.getElementById(`err-${marketId}`);
+      errEl.textContent = '';
+      try {
+        if (!me) throw new Error('Sign in first');
+        const option_id = Number(document.getElementById(`opt-${marketId}`).value);
+        const amount_inr = Number(document.getElementById(`amt-${marketId}`).value);
+        const data = await api(`/api/markets/${marketId}/bets/create-checkout`, { method: 'POST', body: JSON.stringify({ option_id, amount_inr }) });
+        location.href = data.checkout_url;
+      } catch (e) {
+        errEl.textContent = e.message || 'Bet request failed';
+      }
+    }
+
+    async function resolveMarket(marketId) {
+      const winning_option_id = Number(document.getElementById(`resolve-${marketId}`).value);
+      const result = await api(`/api/admin/markets/${marketId}/resolve`, { method: 'POST', body: JSON.stringify({ winning_option_id }) });
+      alert(`Resolved. Total pool: ${inr(result.total_pool)} | Winners pool: ${inr(result.winners_pool)} | Winners: ${result.winner_count}`);
+      await loadMarkets();
+    }
+
+    document.getElementById('signinBtn').addEventListener('click', () => { location.href = API + '/api/auth/twitter/start'; });
+    document.getElementById('logoutBtn').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); await loadMe(); });
+    document.getElementById('createBtn').addEventListener('click', createMarket);
+
+    window.bet = bet;
+    window.resolveMarket = resolveMarket;
+
+    Promise.all([loadMe(), loadMarkets()]).catch(err => alert(err.message));
+  </script>
+</body>
+</html>
