@@ -28,7 +28,7 @@
     <div id="err" class="error"></div>
   </main>
   <script>
-    const API = window.API_BASE || 'http://api.mybetsindia.margatroid.moe';
+    const API = window.API_BASE || 'https://api.mybetsindia.margatroid.moe';
     async function api(path, options = {}) {
       const res = await fetch(API + path, { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...options });
       const json = await res.json().catch(() => ({}));
@@ -64,6 +64,12 @@
       }
     }
 
+    async function loadMe() {
+      const data = await api('/api/auth/me');
+      me = data.user;
+      document.getElementById('me').textContent = me ? `Logged in as ${me.username}` : '';
+    }
+    loadMe();
     window.acceptPayout = acceptPayout;
     load().catch(e => { document.getElementById('err').textContent = e.message; });
   </script>
